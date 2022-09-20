@@ -1,3 +1,11 @@
+"""
+https://docs.sqlalchemy.org/en/14/orm/session_basics.html#when-do-i-construct-a-session-when-do-i-commit-it-and-when-do-i-close-it
+
+As a general rule, the application should manage the lifecycle of the session externally to functions
+that deal with specific data. This is a fundamental separation of concerns
+which keeps data-specific operations agnostic of the context in which they access and manipulate that data.
+"""
+
 import sqlalchemy as sq
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
@@ -38,20 +46,30 @@ def create_db_engine(protocol, user, db_name, host='localhost', port=5432):
 
 
 def create_tables(engine):
+    # Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 
 
-def insert_data_from_json(file_path, db_session, db_map):
+# Функция не подключается к БД !
+# Все действия с БД происходят "извне" в блоке main()
+def create_models_from_json(file_path, db_map):
     with open(file_path) as f:
         models = json.load(f)
-    with db_session:
-        for model in models:
-            data_model = db_map[model["model"]](id=model["pk"], **model["fields"])
-            db_session.add(data_model)
-        try:
-            db_session.commit()
-        except IntegrityError:
-            print('Вставка данных из файла: данные уже есть в БД !')
+
+    db_models_list = []
+    for model in models:
+        data_model = db_map[model["model"]](id=model["pk"], **model["fields"])
+        db_models_list.append(data_model)
+        return db_models_list
+
+    # with db_session:
+    #     for model in models:
+    #         data_model = db_map[model["model"]](id=model["pk"], **model["fields"])
+    #         db_session.add(data_model)
+    #     try:
+    #         db_session.commit()
+    #     except IntegrityError:
+    #         print('Вставка данных из файла: данные уже есть в БД !')
 
 
 def get_shops_by_publisher_name(publisher_name, db_session):
@@ -82,13 +100,22 @@ def main():
     Session = sessionmaker(bind=engine)
     session = Session()
     # Заполняем таблицы данными из ".json" файла
+    # Открываем сессию с БД
     with session:
-        insert_data_from_json(data_file_path, session, db_models_map)
+        # session.begin()
+        # Транзакция внутри блока "try...exept"
+        try:
+            rows_to_insert = create_models_from_json(data_file_path, db_models_map)
+            session.add_all(rows_to_insert)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            print('Вставка данных из файла: данные уже есть в БД !')
 
     # Находим список магазинов, продающих целевого издателя
     print('Найдем список магазинов, продающих целевого издателя')
     publisher_name = input('Введите часть имени издателя: ')
-    session = Session()
+    # session = Session()
     with session:
         shops = get_shops_by_publisher_name(publisher_name, session)
         if shops:
